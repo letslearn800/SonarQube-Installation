@@ -13,7 +13,7 @@ psql -c "ALTER USER sonar WITH ENCRYPTED PASSWORD 'sonar';"
 createdb -O sonar sonarqube
 exit
 -------------------------
-wget https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-10.5.1.90531.zip
+wget https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-10.5.1.90531.zip                
 
 sudo apt install unzip -y
 unzip sonarqube-10.5.1.90531.zip 
