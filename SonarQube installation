@@ -1,69 +1,115 @@
+In AWS create a VM (ubutu) and allow all traffic.----
+apt update -y        to update server
+apt install maven -y
+apt install git -y
+sudo apt install -y openjdk-17-jdk
 
-sudo apt update && sudo apt upgrade -y
-sudo apt install openjdk-17-jdk -y
-java -version
-sudo apt install postgresql postgresql-contrib -y
-sudo systemctl start postgresql
-sudo systemctl enable postgresql
-sudo -i -u postgres
+apt  install docker.io -y
+docker ps -a
+docker images
 
-------------------
-createuser sonar
-psql -c "ALTER USER sonar WITH ENCRYPTED PASSWORD 'sonar';"
-createdb -O sonar sonarqube
-exit
--------------------------
-wget https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-10.5.1.90531.zip                
+---------SonarQube:---------------------------------------------------------------------------
+docker search sonarqube          # To install SonarQube.
+docker run -d --name sonarqube1 -p 9000:9000 sonarqube
 
-sudo apt install unzip -y
-unzip sonarqube-10.5.1.90531.zip 
-sudo mv sonarqube-10.5.1.90531 /opt/sonarqube
-sudo groupadd sonar
-sudo useradd -d /opt/sonarqube -g sonar sonar
-sudo chown -R sonar:sonar /opt/sonarqube
-
-sudo mkdir -p /opt/sonarqube/logs
-sudo chown -R sonar:sonar /opt/sonarqube/logs
-
--------------------------
-sudo nano /opt/sonarqube/conf/sonar.properties
+--------In SonarQube Dashboard:-------------------------------
+user---admin, password----admin
+Go to Administration---security---users---tokens---create token---name (sonartoken)---then copy the URL for further use.
 
 
-sonar.jdbc.username=sonar
-sonar.jdbc.password=sonar
-sonar.jdbc.url=jdbc:postgresql://localhost/sonarqube
-sonar.path.logs=/opt/sonarqube/logs   
-------------------------------------------
+------------Now in Jenkins:----------------------------------------------------------------
 
-------------------------------------
-sudo nano /etc/systemd/system/sonarqube.service
+docker search jenkins
+docker run -d --name jenkins1 -p 8080:8080 -p 50000:50000 -v premvolume:/var/jenkins_home jenkins/jenkins
+docker ps -a
+docker images
+docker exec -it be5ebe05272f bash              # go inside the container.
+cat /var/jenkins_home/secrets/initialAdminPassword
+docker start <jenkins-container_id>
+Make user and passward---finish
+In Manage jenkins---plugins---available plugins---search (maven, stage view pipeline, Eclipse Temurin installer, deploy to container, sonarqube, docker,)---install---restart--jenkins.
+In Tools---add java-17 (install from adoptium.net)---SonarQube Scanner installations (add-sonar)---add maven----add docker (install automatically-download from docker.com)---apply---save.
+In Credentials---global---add credentials---kind (secrete text)---secret (sonartokens URL)---id (sonar-cred)---create.
+In System---also enable Environment variables---go to SonarQube installations (add sonarqube)---Server URL (http://23.22.101.232:9000)---server authenticationtoken (sonar-cred)----apply---save
 
-[Unit]
-Description=SonarQube service
-After=syslog.target network.target
+Now create a job---Build&deploy---pipeline---ok    [{( in this pipeline there are gitleak, trivy, and sonarqube scan stages)}]
 
-[Service]
-Type=forking
-ExecStart=/opt/sonarqube/bin/linux-x86-64/sonar.sh start
-ExecStop=/opt/sonarqube/bin/linux-x86-64/sonar.sh stop
-User=sonar
-Group=sonar
-Restart=always
-LimitNOFILE=65536
-LimitNPROC=4096
-LimitAS=infinity
-LimitFSIZE=infinity
-PIDFile=/opt/sonarqube/temp/sonar.pid
+paste this pipeline script after making some changes (github URL, Branch, sonarqube URL, sonar-cred,) :---
 
-[Install]
-WantedBy=multi-user.target
--------------------------------
 
-sudo systemd-analyze verify /etc/systemd/system/sonarqube.service
-sudo adduser --system --no-create-home --group sonar
-sudo chown -R sonar:sonar /opt/sonarqube
-sudo chown -R sonar:sonar /opt/sonarqube
-sudo chmod -R 755 /opt/sonarqube
-sudo systemctl daemon-reload
-sudo systemctl start sonarqube
-sudo systemctl enable sonarqube
+pipeline {
+    agent any
+
+    tools {
+        maven 'maven'
+    }
+
+    environment {
+        GIT_REPO_URL = 'https://github.com/sabanuzhat/hello-world.git'
+        BRANCH = 'master'
+        SONAR_HOST_URL = 'http://13.233.166.219:9000'
+    }
+
+    stages {
+        stage('Checkout Code') {
+            steps {
+                git branch: "${env.BRANCH}", url: "${env.GIT_REPO_URL}"
+            }
+        }
+
+        stage('Gitleaks Secret Scan') {
+            steps {
+                script {
+                    sh '''
+                        docker run --rm \
+                        -v $(pwd):/path \
+                        zricethezav/gitleaks:latest \
+                        detect --source=/path --no-git --report-format=json --report-path=gitleaks-report.json || true
+                    '''
+                }
+            }
+        }
+
+        stage('Trivy Vulnerability Scan') {
+            steps {
+                script {
+                    sh '''
+                        docker run --rm \
+                        -v $(pwd):/scan \
+                        aquasec/trivy:latest \
+                        fs /scan \
+                        --exit-code 0 \
+                        --skip-dirs .git,target/test-classes \
+                        --format table || true
+                    '''
+                }
+            }
+        }
+
+        stage('SonarQube Scan') {
+            steps {
+                withCredentials([string(credentialsId: 'sonar_token', variable: 'SONAR_TOKEN')]) {
+                    sh """
+                        mvn sonar:sonar \
+                        -Dsonar.projectKey=hello-world \
+                        -Dsonar.host.url=${SONAR_HOST_URL} \
+                        -Dsonar.login=${SONAR_TOKEN}
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ Build completed successfully!"
+        }
+        failure {
+            echo "❌ Build failed."
+        }
+    }
+}
+
+
+Now check SonarQube dashboard you will see date...
+
