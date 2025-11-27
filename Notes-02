@@ -1,0 +1,67 @@
+GITLEAK, TRIVY, SONARQUBE INTEGRATION
+
+
+pipeline {
+    agent any
+
+    tools {
+        maven 'maven'
+    }
+
+    environment {
+        GIT_REPO_URL = 'https://github.com/sabanuzhat/hello-world.git'
+        BRANCH = 'master'
+    }
+
+    stages {
+        stage('Checkout Code') {
+            steps {
+                git branch: "${env.BRANCH}", url: "${env.GIT_REPO_URL}"
+            }
+        }
+
+        stage('Gitleaks Secret Scan') {
+            steps {
+                script {
+                    sh '''
+                        docker run --rm \
+                        -v $(pwd):/path \
+                        zricethezav/gitleaks:latest \
+                        detect --source=/path --no-git --report-format=json --report-path=gitleaks-report.json || true
+                    '''
+                }
+            }
+        }
+
+        stage('Trivy Vulnerability Scan') {
+            steps {
+                script {
+                    sh '''
+                        docker run --rm \
+                        -v $(pwd):/scan \
+                        aquasec/trivy:latest \
+                        fs /scan \
+                        --exit-code 0 \
+                        --skip-dirs .git,target/test-classes \
+                        --format table || true
+                    '''
+                }
+            }
+        }
+
+        stage('Build with Maven') {
+            steps {
+                sh 'mvn clean install'
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ Build completed successfully!"
+        }
+        failure {
+            echo "❌ Build failed."
+        }
+    }
+}
