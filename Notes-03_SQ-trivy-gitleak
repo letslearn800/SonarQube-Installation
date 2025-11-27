@@ -70,3 +70,78 @@ pipeline {
         }
     }
 }
+
+
+
+
+**************************************************************************************************
+###############################################################################################33#
+
+
+pipeline {
+    agent any
+
+    environment {
+        IMAGE_NAME = 'aquasec/trivy' // Docker image to scan
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo '📥 Checking out source code...'
+                git branch: 'master', url: 'https://github.com/letslearn800/hello-world.git'
+            }
+        }
+
+        stage('Gitleaks Scan') {
+            steps {
+                echo '🔍 Running Gitleaks scan...'
+                sh '''
+                    docker run --rm \
+                        -v $PWD:/repo \
+                        zricethezav/gitleaks:latest detect \
+                        --source=/repo \
+                        --exit-code 1
+                '''
+            }
+        }
+
+        stage('Trivy Scan') {
+            steps {
+                echo '🔍 Running Trivy image scan...'
+                sh '''
+                    docker run --rm \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        aquasec/trivy:latest image --exit-code 1 --severity HIGH,CRITICAL $IMAGE_NAME
+                '''
+            }
+        }
+
+        stage('SonarQube Scan') {
+            environment {
+                SONAR_TOKEN = credentials('sonar-cred')
+            }
+            steps {
+                echo '📊 Running SonarQube scan...'
+                withSonarQubeEnv('sonar') { // Name must match Jenkins SonarQube config
+                    sh '''
+                        mvn sonar:sonar \
+                            -Dsonar.projectKey=hello-world \
+                            -Dsonar.host.url=$SONAR_HOST_URL \
+                            -Dsonar.login=$SONAR_TOKEN
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        failure {
+            echo '❌ Pipeline failed!'
+        }
+        success {
+            echo '✅ Pipeline completed successfully!'
+        }
+    }
+}
+
